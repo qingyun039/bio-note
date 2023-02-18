@@ -16,7 +16,7 @@ function entryStep {
 		{ $@ 2>> $logfile; }
 		if [[ $? -eq 0 ]]
 		then
-			echo $tmpout > ok 
+			echo $tmpout > ok
 		else
 			exit 2
 		fi
@@ -30,7 +30,11 @@ function fastqc {
 
 	tmpout="$PWD/${sample}_1.fastq.gz $PWD/${sample}_2.fastq.gz"
 
-	fastp -i $read1 -I $read2 -o ${sample}_1.fastq.gz -O ${sample}_2.fastq.gz -w $thread $fastp
+	fastp -i $read1 -I $read2 -o ${sample}_1.fastq.gz -O ${sample}_2.fastq.gz \
+        --unpaired1 ${sample}_unpair_1.fastq.gz \
+        --unpaired2 ${sample}_unpair_2.fastq.gz \
+        --failed_out ${sample}_failed.fastq.gz \
+        -w $thread $fastp
 }
 
 function alignPlus {
@@ -86,7 +90,7 @@ function parallelBQSR {
 }
 
 function parallelHC {
-	
+
 	tmpin=$tmpout
 
 	subfix='.vcf.gz'
@@ -113,7 +117,7 @@ function parallelHC {
 function callVariants {
 
 	tmpin=$tmpout
-	
+
 	subfix='.vcf.gz'
 	gvcf_param=''
 	if [[ $gvcf -eq 1 ]]; then subfix=".g.vcf.gz"; gvcf_param="-ERC GVCF"; fi
@@ -124,6 +128,32 @@ function callVariants {
 		-O ${sample}${subfix} \
 		-bamout $sample.hc.bam
 }
+
+function strelkaGermline {
+	tmpin=$tmpout
+	tmpout="$PWD/results/variants/variants.vcf.gz"
+	bedtools sort -i $bedfile > region.bed && \
+	bgzip -c region.bed > region.bed.gz && \
+	tabix -p bed region.bed.gz && \
+	/data/software/src/strelka-2.9.10.centos6_x86_64/bin/configureStrelkaGermlineWorkflow.py \
+		--bam $tmpin \
+		--referenceFasta $reference \
+		--runDir . \
+		--callRegions region.bed.gz \
+		--exome && \
+	./runWorkflow.py  -m local -j $thread
+}
+
+function varscanGermline {
+	tmpin=$tmpout
+	samtools mpileup -B -f $reference $tmpin | java -jar /data/home/chenshulin/.local/src/VarScan.v2.4.2.jar mpileup2snp --output-vcf 1 > varscan.snp.vcf && \
+	samtools mpileup -B -f $reference $tmpin | java -jar /data/home/chenshulin/.local/src/VarScan.v2.4.2.jar mpileup2indel --output-vcf 1 > varscan.indel.vcf
+
+}
+
+#function jointtype {
+
+#}
 
 function filterCNN {
 
@@ -141,7 +171,7 @@ function filterCNN {
 		-resource ${phase1_snps} \
 		-info-key CNN_1D \
 		--snp-tranche 99.95 \
-		--indel-tranche 99.4 
+		--indel-tranche 99.4
 }
 
 function filterHard {
@@ -156,8 +186,8 @@ function filterHard {
 		-R $reference \
 		-V $sample.snps.vcf.gz \
 		-O $sample.snps.filtered.vcf.gz \
-		--filter-expression "QD < 2.0" \
-		--filter-name "QD_lt_2" \
+		--filter-expression "QD < 6.5" \
+		--filter-name "QD_lt_6.5" \
 		--filter-expression "QUAL < 30.0" \
 		--filter-name "QUAL_lt_30" \
 		--filter-expression "FS > 100.0" \
@@ -193,24 +223,25 @@ function filterHard {
 
 function annoAnnovar {
 	tmpin=$tmpout
-	tmpout="$PWD/$sample.hg19_multianno.txt"
+	tmpout="$PWD/$sample.${buildver}_multianno.txt"
+	#vt decompose $tmpin | vt normalize -r $reference - > $sample.norm.vcf && \
 	perl /data/database/annovar/table_annovar.pl $tmpin $humandb \
 		-out $sample \
-		-buildver hg19 \
+		-buildver ${buildver} \
 		-remove \
-		-protocol refGene,cytoBand,avsnp150,1000g2015aug_all,clinvar,intervar,dbnsfp41a,gnomad211_exome \
-		-operation g,r,f,f,f,f,f,f \
+		-protocol refGene,cytoBand,avsnp150,1000g2015aug_all,1000g2015aug_eas,clinvar,intervar,dbnsfp41a,gnomad211_exome \
+		-operation g,r,f,f,f,f,f,f,f \
 		-nastring . \
 		-vcfinput -polish
 }
 
 function Test {
-	ls lll
-	tmpout="ld"
+
+	echo job.{#}
 }
 
 
-if [[ $# -eq 1 ]]; 
+if [[ $# -eq 1 ]];
 then
 	confile=$1
 	source $confile
@@ -250,6 +281,7 @@ Database:
 	phase1_snps: ${phase1_snps:=/data/database/gatk-bundle-hg19/1000G_phase1.snps.high_confidence.hg19.sites.vcf}
 	hapmap: ${hapmap:=/data/database/gatk-bundle-hg19/hapmap_3.3.hg19.sites.vcf}
 	humandb: ${humandb:=/data/home/chenshulin/humandb/}
+	buildver: ${buildver:=hg19}
 "
 
 step=0
@@ -268,16 +300,18 @@ entryStep align alignPlus;
 
 entryStep bqsr parallelBQSR;
 
+#entryStep varscan varscanGermline;
+
 entryStep calls parallelHC;
+
+if [[ $gvcf -ne 1 ]]; then
+
+entryStep filter filterCNN;
 
 entryStep hardf filterHard;
 
-#entryStep filter filterCNN;
+entryStep anno annoAnnovar;
 
-#entryStep anno annoAnnovar;
-
+fi
 
 echo -e "---------------[ `date`: END ]---------------" >> $logfile
-
-
-#entryStep filter2 filterHard;

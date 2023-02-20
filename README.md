@@ -12,3 +12,6 @@
 - trios_call.sh 家系变异检测
 - wes_germline.sh 简单的全外流程
 - bamdst bamdst增加自定义的深度覆盖
+- seqwatch.pl 检测ILLUNIMA下机路径自动拆分
+- PickRun 检测下机数据，C实现
+

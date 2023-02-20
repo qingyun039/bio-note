@@ -14,4 +14,4 @@
 - bamdst bamdst增加自定义的深度覆盖
 - seqwatch.pl 检测ILLUNIMA下机路径自动拆分
 - PickRun 检测下机数据，C实现
-
+- addRxTagFromQname.c bam文件添加RX标签
